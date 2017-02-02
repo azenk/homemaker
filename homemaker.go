@@ -28,6 +28,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"io/ioutil"
 )
 
 const (
@@ -81,30 +82,56 @@ func main() {
 		flags |= flagUnlink
 	}
 
+	var confFile string
+	var srcDir string
 	if flag.NArg() == 2 {
-		confFile := makeAbsPath(flag.Arg(0))
-
-		conf, err := newConfig(confFile)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		conf.srcDir = makeAbsPath(flag.Arg(1))
-		conf.dstDir = makeAbsPath(*dstDir)
-		conf.variant = *variant
-		conf.flags = flags
-
-		os.Setenv("HM_CONFIG", confFile)
-		os.Setenv("HM_TASK", *taskName)
-		os.Setenv("HM_SRC", conf.srcDir)
-		os.Setenv("HM_DEST", conf.dstDir)
-		os.Setenv("HM_VARIANT", conf.variant)
-
-		if err := processTask(*taskName, conf); err != nil {
-			log.Fatal(err)
+		confFile = makeAbsPath(flag.Arg(0))
+		srcDir = makeAbsPath(flag.Arg(1))
+	} else if flag.NArg() == 1 {
+		// default to using a tasks.yml file if found in the specified directory, otherwise no config
+		srcDir = makeAbsPath(flag.Arg(0))
+		defaultConfFilePath := path.Join(srcDir,"tasks.yml")
+		if _, err := os.Stat(defaultConfFilePath); err == nil {
+			confFile = defaultConfFilePath
 		}
 	} else {
 		usage()
 		os.Exit(2)
+	}
+
+	var conf *config
+	if confFile != "" {
+		var err error
+		conf, err = newConfig(confFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		// if no config is found,
+		// assume all files/folders found should be links
+		conf = &config{handled: make(map[string]bool), Tasks: make(map[string]task)}
+		default_task := task{}
+
+		entries, err := ioutil.ReadDir(srcDir)
+		if err != nil { log.Fatalf("Unable to build list of links: %s", err) }
+		for _, entry := range entries {
+			default_task.Links = append(default_task.Links, []string{entry.Name(), entry.Name()})
+		}
+		conf.Tasks["default"] = default_task
+	}
+
+	conf.srcDir = makeAbsPath(flag.Arg(1))
+	conf.dstDir = makeAbsPath(*dstDir)
+	conf.variant = *variant
+	conf.flags = flags
+
+	os.Setenv("HM_CONFIG", confFile)
+	os.Setenv("HM_TASK", *taskName)
+	os.Setenv("HM_SRC", conf.srcDir)
+	os.Setenv("HM_DEST", conf.dstDir)
+	os.Setenv("HM_VARIANT", conf.variant)
+
+	if err := processTask(*taskName, conf); err != nil {
+		log.Fatal(err)
 	}
 }
